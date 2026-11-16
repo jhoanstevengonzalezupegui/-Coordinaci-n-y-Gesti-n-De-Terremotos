@@ -1,0 +1,3 @@
+carlos|2222|Carlos Diaz|voluntario|sur|true|2026-11-16T20:08:30Z~Registro y conexión inicial
+laura|1234|Laura Gomez|coordinador|centro|true|2026-11-16T20:10:46Z~Inicio de sesión;2026-11-16T20:08:30Z~Inicio de sesión;2026-11-16T20:05:42Z~Registro y conexión inicial
+pedro|1111|Pedro Ruiz|ciudadano|norte|true|2026-11-16T20:08:30Z~Registro y conexión inicial

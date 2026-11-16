@@ -1,0 +1,2 @@
+PET01|perdida|perro|Luna|collar rojo|negra|mediana|centro|3001112233|activa|
+PET02|encontrada|perro|desconocido|collar rojo|negra|mediana|centro|3119998877|activa|
