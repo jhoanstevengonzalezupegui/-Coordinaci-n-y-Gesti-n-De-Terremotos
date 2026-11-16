@@ -1,5 +1,5 @@
 {application,emergencia,
-             [{config_mtime,1794856901},
+             [{config_mtime,1794867450},
               {optional_applications,[]},
               {applications,[kernel,stdlib,elixir,logger]},
               {description,"emergencia"},
