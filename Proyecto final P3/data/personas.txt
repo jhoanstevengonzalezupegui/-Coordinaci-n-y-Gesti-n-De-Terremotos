@@ -1,1 +1,2 @@
 P001|Andres Perez|1094555|28|centro|en_albergue|2026-11-16T20:11:46Z~en_albergue~Registro inicial en zona centro
+P002|Andres Gomez|1094888|0|zona_norte|localizada|2026-11-16T23:19:12Z~localizada~Registro inicial en zona zona_norte

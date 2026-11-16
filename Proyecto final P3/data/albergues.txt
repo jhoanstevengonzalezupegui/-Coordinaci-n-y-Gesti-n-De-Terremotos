@@ -1,1 +1,2 @@
 A01|Albergue Central|centro|50|1|1094555||
+A02|Albergue Norte|zona_norte|150|0|||

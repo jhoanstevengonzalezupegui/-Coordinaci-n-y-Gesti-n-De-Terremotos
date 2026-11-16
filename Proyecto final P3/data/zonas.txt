@@ -1,1 +1,2 @@
 Z01|Zona Centro|critico|150|S01~Sector Parque~critico~60~P01:Carpa Medica:salud;S02~Sector Estacion~alto~40~P02:Centro Acopio:acopio||||
+Z02|Zona Norte|alto|0|||||

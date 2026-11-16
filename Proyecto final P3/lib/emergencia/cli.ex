@@ -1,7 +1,8 @@
 defmodule Emergencia.CLI do
   @moduledoc """
   Interfaz de línea de comandos (CLI) interactiva para el Sistema Distribuido
-  de Gestión de Emergencias.
+  de Gestión de Emergencias. Soporta los comandos oficiales del proyecto (en inglés)
+  y sus alias en español.
   """
 
   alias Emergencia.OperacionesExtendidas
@@ -23,7 +24,7 @@ defmodule Emergencia.CLI do
     IO.puts("\n============================================================")
     IO.puts("  SISTEMA DE GESTION DE EMERGENCIAS Y AYUDA HUMANITARIA")
     IO.puts("============================================================")
-    IO.puts("Escribe 'ayuda' para ver los comandos disponibles o 'salir'.\n")
+    IO.puts("Escribe 'ayuda' (o 'help') para ver los comandos o 'salir'.\n")
     ciclo(%{usuario: nil})
   end
 
@@ -63,15 +64,9 @@ defmodule Emergencia.CLI do
 
   defp procesar_comando([], sesion), do: {:ok, sesion}
 
-  defp procesar_comando(["salir"], sesion), do: {:salir, sesion}
-  defp procesar_comando(["exit"], sesion), do: {:salir, sesion}
+  defp procesar_comando([cmd], sesion) when cmd in ["salir", "exit", "quit"], do: {:salir, sesion}
 
-  defp procesar_comando(["ayuda"], sesion) do
-    mostrar_ayuda()
-    {:ok, sesion}
-  end
-
-  defp procesar_comando(["help"], sesion) do
+  defp procesar_comando([cmd], sesion) when cmd in ["ayuda", "help"] do
     mostrar_ayuda()
     {:ok, sesion}
   end
@@ -85,7 +80,7 @@ defmodule Emergencia.CLI do
         [n | _] -> n
       end
 
-    rol = String.to_atom(rol_str)
+    rol = normalizar_atomo(rol_str)
 
     case UsuariosServer.connect(username, password, rol, zona, nombre) do
       {:ok, estado, usuario} ->
@@ -120,13 +115,13 @@ defmodule Emergencia.CLI do
     {:ok, %{sesion | usuario: nil}}
   end
 
-  # --- ZONAS AFECTADAS ---
+  # --- ZONAS AFECTADAS (register_zone) ---
 
-  defp procesar_comando(["zona_registrar", codigo, nombre, riesgo_str, afectados_str], sesion) do
+  defp procesar_comando([cmd, codigo, nombre, riesgo_str], sesion)
+       when cmd in ["register_zone", "zona_registrar"] do
     with {:ok, _} <- verificar_permiso(sesion, :registrar_zona),
-         {afectados, ""} <- Integer.parse(afectados_str),
-         {:ok, zona} <- ZonasServer.registrar_zona(codigo, nombre, String.to_atom(riesgo_str), afectados) do
-      IO.puts("[OK] Zona registrada: #{zona.codigo} - #{zona.nombre} (Afectación: #{zona.nivel_afectacion})")
+         {:ok, zona} <- ZonasServer.registrar_zona(codigo, nombre, normalizar_atomo(riesgo_str), 0) do
+      IO.puts("[OK] Zona registrada: #{zona.codigo} - #{zona.nombre} (Nivel: #{zona.nivel_afectacion})")
     else
       err -> imprimir_error(err)
     end
@@ -134,11 +129,26 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["sector_agregar", zona_cod, sec_cod, nombre, riesgo_str, afectados_str], sesion) do
+  defp procesar_comando([cmd, codigo, nombre, riesgo_str, afectados_str], sesion)
+       when cmd in ["register_zone", "zona_registrar"] do
+    with {:ok, _} <- verificar_permiso(sesion, :registrar_zona),
+         {afectados, ""} <- Integer.parse(afectados_str),
+         {:ok, zona} <-
+           ZonasServer.registrar_zona(codigo, nombre, normalizar_atomo(riesgo_str), afectados) do
+      IO.puts("[OK] Zona registrada: #{zona.codigo} - #{zona.nombre} (Nivel: #{zona.nivel_afectacion})")
+    else
+      err -> imprimir_error(err)
+    end
+
+    {:ok, sesion}
+  end
+
+  defp procesar_comando([cmd, zona_cod, sec_cod, nombre, riesgo_str, afectados_str], sesion)
+       when cmd in ["add_sector", "sector_agregar"] do
     with {:ok, _} <- verificar_permiso(sesion, :registrar_zona),
          {afectados, ""} <- Integer.parse(afectados_str),
          {:ok, _zona} <-
-           ZonasServer.agregar_sector(zona_cod, sec_cod, nombre, String.to_atom(riesgo_str), afectados) do
+           ZonasServer.agregar_sector(zona_cod, sec_cod, nombre, normalizar_atomo(riesgo_str), afectados) do
       IO.puts("[OK] Sector #{sec_cod} agregado a la zona #{zona_cod}.")
     else
       err -> imprimir_error(err)
@@ -147,7 +157,8 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["punto_agregar", zona_cod, sec_cod, punto_cod, nombre, tipo], sesion) do
+  defp procesar_comando([cmd, zona_cod, sec_cod, punto_cod, nombre, tipo], sesion)
+       when cmd in ["add_point", "punto_agregar"] do
     with {:ok, _} <- verificar_permiso(sesion, :registrar_zona),
          {:ok, _zona} <- ZonasServer.agregar_punto_atencion(zona_cod, sec_cod, punto_cod, nombre, tipo) do
       IO.puts("[OK] Punto de atención #{punto_cod} (#{tipo}) agregado al sector #{sec_cod}.")
@@ -158,7 +169,7 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["zona_stats", zona_cod], sesion) do
+  defp procesar_comando([cmd, zona_cod], sesion) when cmd in ["zone_stats", "zona_stats"] do
     case ZonasServer.estadisticas_zona(zona_cod) do
       {:ok, stats} ->
         IO.puts("--- Estadísticas Recursivas Zona #{zona_cod} ---")
@@ -176,10 +187,35 @@ defmodule Emergencia.CLI do
 
   # --- INVENTARIO, TRANSFERENCIAS Y NECESIDADES ---
 
-  defp procesar_comando(
-         ["recurso_registrar", id, nombre, categoria, cant_str, unidad, ubicacion, zona],
-         sesion
-       ) do
+  # Formato oficial: register_resource R001 agua 200 litros centro_acopio_1
+  defp procesar_comando([cmd, id, nombre, cant_str, unidad, ubicacion], sesion)
+       when cmd in ["register_resource", "recurso_registrar"] do
+    zona =
+      if sesion.usuario do
+        sesion.usuario.zona_principal
+      else
+        inferir_zona_ubicacion(ubicacion)
+      end
+
+    categoria = inferir_categoria(nombre)
+
+    with {:ok, _} <- verificar_permiso(sesion, :registrar_recurso),
+         {cantidad, ""} <- Integer.parse(cant_str),
+         {:ok, rec} <-
+           InventarioServer.registrar_recurso(id, nombre, categoria, cantidad, unidad, ubicacion, zona) do
+      cod = OperacionesExtendidas.id_de(rec)
+      u_med = Map.get(rec, :unidad) || Map.get(rec, :unidad_medida, "unidades")
+      IO.puts("[OK] Recurso #{cod} (#{rec.nombre}): #{rec.cantidad_disponible} #{u_med} en #{rec.ubicacion} (#{rec.zona}).")
+    else
+      err -> imprimir_error(err)
+    end
+
+    {:ok, sesion}
+  end
+
+  # Formato extendido: register_resource R01 agua hidratacion 100 litros acopio_centro centro
+  defp procesar_comando([cmd, id, nombre, categoria, cant_str, unidad, ubicacion, zona], sesion)
+       when cmd in ["register_resource", "recurso_registrar"] do
     with {:ok, _} <- verificar_permiso(sesion, :registrar_recurso),
          {cantidad, ""} <- Integer.parse(cant_str),
          {:ok, rec} <-
@@ -194,6 +230,25 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
+  # Formato oficial: transfer_resource R001 centro_acopio_1 albergue_2 30
+  defp procesar_comando(["transfer_resource", rec_id, ubic_origen, ubic_dest, cant_str], sesion) do
+    usuario = if sesion.usuario, do: sesion.usuario.username, else: "anonimo"
+
+    with {:ok, _} <- verificar_permiso(sesion, :asignar_recurso),
+         {cantidad, ""} <- Integer.parse(cant_str),
+         {:ok, info} <-
+           OperacionesExtendidas.transferir_desde_origen(rec_id, ubic_origen, ubic_dest, cantidad, usuario) do
+      IO.puts(
+        "[OK] Transferidos #{info.cantidad_transferida} de '#{info.recurso}' desde #{ubic_origen} (#{info.origen_id}) hacia #{info.ubicacion_destino} (#{info.zona_destino}) -> Nuevo lote: #{info.destino_id}."
+      )
+    else
+      err -> imprimir_error(err)
+    end
+
+    {:ok, sesion}
+  end
+
+  # Alias en español: recurso_transferir R02 albergue_norte norte 20
   defp procesar_comando(["recurso_transferir", rec_id, ubic_dest, zona_dest, cant_str], sesion) do
     usuario = if sesion.usuario, do: sesion.usuario.username, else: "anonimo"
 
@@ -211,8 +266,14 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["recursos" | resto], sesion) do
-    zona = List.first(resto)
+  defp procesar_comando([cmd | resto], sesion) when cmd in ["list_resources", "recursos"] do
+    zona =
+      case resto do
+        ["zona=" <> z | _] -> z
+        [z | _] -> z
+        [] -> nil
+      end
+
     lista = OperacionesExtendidas.listar_recursos(zona)
 
     if lista == [] do
@@ -233,16 +294,47 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["necesidad_registrar", tipo_str, cant_str, prio_str, zona, descripcion], sesion) do
+  defp procesar_comando([cmd | resto], sesion) when cmd in ["critical_resources", "recursos_criticos"] do
+    umbral =
+      case resto do
+        [u_str | _] ->
+          case Integer.parse(u_str) do
+            {n, ""} -> n
+            _ -> 30
+          end
+
+        [] ->
+          30
+      end
+
+    lista = OperacionesExtendidas.recursos_criticos(umbral)
+
+    if lista == [] do
+      IO.puts("No hay recursos en nivel crítico (<= #{umbral} unidades).")
+    else
+      IO.puts("--- Recursos en Nivel Crítico (<= #{umbral}) ---")
+
+      Enum.each(lista, fn r ->
+        cod = OperacionesExtendidas.id_de(r)
+        u_med = Map.get(r, :unidad) || Map.get(r, :unidad_medida, "unidades")
+        IO.puts("  [#{cod}] #{r.nombre}: #{r.cantidad_disponible} #{u_med} | Ubic: #{r.ubicacion} | Zona: #{r.zona}")
+      end)
+    end
+
+    {:ok, sesion}
+  end
+
+  defp procesar_comando([cmd, tipo_str, cant_str, prio_str, zona, descripcion], sesion)
+       when cmd in ["register_need", "necesidad_registrar"] do
     usuario = if sesion.usuario, do: sesion.usuario.username, else: "anonimo"
 
     with {:ok, _} <- verificar_permiso(sesion, :registrar_necesidad),
          {cantidad, ""} <- Integer.parse(cant_str),
          {:ok, nec} <-
            InventarioServer.registrar_necesidad(
-             String.to_atom(tipo_str),
+             normalizar_atomo(tipo_str),
              cantidad,
-             String.to_atom(prio_str),
+             normalizar_atomo(prio_str),
              zona,
              descripcion,
              usuario,
@@ -259,14 +351,8 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["necesidades" | resto], sesion) do
-    {zona, prio} =
-      case resto do
-        [] -> {nil, nil}
-        [z] -> {z, nil}
-        [z, p | _] -> {z, p}
-      end
-
+  defp procesar_comando([cmd | resto], sesion) when cmd in ["list_needs", "necesidades"] do
+    {zona, prio} = parsear_filtros_necesidades(resto)
     lista = OperacionesExtendidas.listar_necesidades(zona, prio)
 
     if lista == [] do
@@ -288,10 +374,35 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["recurso_asignar", necesidad_id, recurso_id, cant_str], sesion) do
+  defp procesar_comando([cmd], sesion) when cmd in ["pending_needs", "necesidades_pendientes"] do
+    lista = OperacionesExtendidas.listar_necesidades_pendientes()
+
+    if lista == [] do
+      IO.puts("No hay necesidades pendientes.")
+    else
+      IO.puts("--- Necesidades Pendientes (Ordenadas por Prioridad) ---")
+
+      Enum.each(lista, fn n ->
+        cod = OperacionesExtendidas.id_de(n)
+        tipo = Map.get(n, :tipo) || Map.get(n, :categoria, :general)
+        cant = Map.get(n, :cantidad) || Map.get(n, :cantidad_requerida, 0)
+        asig = Map.get(n, :cantidad_asignada, 0)
+
+        IO.puts(
+          "  [#{cod}] Prio: #{n.prioridad} | Estado: #{n.estado} | #{tipo} (#{asig}/#{cant}) | Zona: #{n.zona} | #{n.descripcion}"
+        )
+      end)
+    end
+
+    {:ok, sesion}
+  end
+
+  defp procesar_comando([cmd, necesidad_id, recurso_o_nombre, cant_str], sesion)
+       when cmd in ["assign_resource", "recurso_asignar"] do
     with {:ok, _} <- verificar_permiso(sesion, :asignar_recurso),
          {cantidad, ""} <- Integer.parse(cant_str),
-         {:ok, resultado} <- InventarioServer.asignar_recurso(necesidad_id, recurso_id, cantidad) do
+         {:ok, resultado} <-
+           OperacionesExtendidas.asignar_recurso_flexible(necesidad_id, recurso_o_nombre, cantidad) do
       IO.puts("[OK] Asignación completada: #{inspect(resultado)}")
     else
       err -> imprimir_error(err)
@@ -314,7 +425,8 @@ defmodule Emergencia.CLI do
 
   # --- ALBERGUES ---
 
-  defp procesar_comando(["albergue_registrar", id, nombre, zona, cap_str], sesion) do
+  defp procesar_comando([cmd, id, nombre, zona, cap_str], sesion)
+       when cmd in ["register_shelter", "albergue_registrar"] do
     with {:ok, _} <- verificar_permiso(sesion, :gestionar_albergue),
          {capacidad, ""} <- Integer.parse(cap_str),
          {:ok, alb} <- AlberguesServer.registrar_albergue(id, nombre, zona, capacidad) do
@@ -328,7 +440,8 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["albergue_ingreso", albergue_id, documento], sesion) do
+  defp procesar_comando([cmd, albergue_id, documento], sesion)
+       when cmd in ["register_entry", "albergue_ingreso"] do
     with {:ok, _} <- verificar_permiso(sesion, :gestionar_albergue),
          {:ok, alb} <- AlberguesServer.registrar_ingreso(albergue_id, documento) do
       cod = OperacionesExtendidas.id_de(alb)
@@ -342,7 +455,8 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["albergue_salida", albergue_id, documento], sesion) do
+  defp procesar_comando([cmd, albergue_id, documento], sesion)
+       when cmd in ["register_exit", "albergue_salida"] do
     with {:ok, _} <- verificar_permiso(sesion, :gestionar_albergue),
          {:ok, alb} <- AlberguesServer.registrar_salida(albergue_id, documento) do
       cod = OperacionesExtendidas.id_de(alb)
@@ -356,7 +470,8 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["albergue_consultar", albergue_id], sesion) do
+  defp procesar_comando([cmd, albergue_id], sesion)
+       when cmd in ["check_shelter", "albergue_consultar"] do
     case OperacionesExtendidas.consultar_albergue(albergue_id) do
       {:ok, info} ->
         IO.puts("--- Albergue #{info.id}: #{info.nombre} (Zona: #{info.zona}) ---")
@@ -371,7 +486,7 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["albergues_reporte"], sesion) do
+  defp procesar_comando([cmd], sesion) when cmd in ["shelters_report", "albergues_reporte"] do
     reporte = OperacionesExtendidas.reporte_albergues()
 
     if reporte == [] do
@@ -391,16 +506,35 @@ defmodule Emergencia.CLI do
 
   # --- FAMILIARES Y MENSAJERÍA ---
 
-  defp procesar_comando(["persona_reportar", doc, nombre, zona, estado_str, edad_str], sesion) do
+  # Formato oficial (4 args): report_person documento nombre zona estado
+  defp procesar_comando([cmd, doc, nombre, zona, estado_str], sesion)
+       when cmd in ["report_person", "persona_reportar"] do
+    estado = normalizar_estado_persona(estado_str)
+
+    res =
+      case FamiliaresServer.reportar_o_actualizar_persona(doc, nombre, zona, estado, 0) do
+        {:error, _} -> FamiliaresServer.reportar_o_actualizar_persona(doc, nombre, zona, estado, 1)
+        ok -> ok
+      end
+
+    case res do
+      {:ok, p} ->
+        IO.puts("[OK] Persona #{p.nombre} (Doc: #{p.documento}) registrada con estado '#{p.estado}'.")
+
+      err ->
+        imprimir_error(err)
+    end
+
+    {:ok, sesion}
+  end
+
+  # Formato con edad (5 args): report_person documento nombre zona estado edad
+  defp procesar_comando([cmd, doc, nombre, zona, estado_str, edad_str], sesion)
+       when cmd in ["report_person", "persona_reportar"] do
+    estado = normalizar_estado_persona(estado_str)
+
     with {edad, ""} <- Integer.parse(edad_str),
-         {:ok, p} <-
-           FamiliaresServer.reportar_o_actualizar_persona(
-             doc,
-             nombre,
-             zona,
-             String.to_atom(estado_str),
-             edad
-           ) do
+         {:ok, p} <- FamiliaresServer.reportar_o_actualizar_persona(doc, nombre, zona, estado, edad) do
       IO.puts("[OK] Persona #{p.nombre} (Doc: #{p.documento}) registrada con estado '#{p.estado}'.")
     else
       err -> imprimir_error(err)
@@ -409,7 +543,7 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["persona_buscar", criterio], sesion) do
+  defp procesar_comando([cmd, criterio], sesion) when cmd in ["find_person", "persona_buscar"] do
     resultados = OperacionesExtendidas.buscar_personas(criterio)
 
     if resultados == [] do
@@ -428,7 +562,8 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["mensaje_enviar", doc_destino, contenido], sesion) do
+  defp procesar_comando([cmd, doc_destino, contenido], sesion)
+       when cmd in ["send_family_message", "mensaje_enviar"] do
     remitente = if sesion.usuario, do: sesion.usuario.username, else: "familiar_externo"
 
     case FamiliaresServer.enviar_mensaje(remitente, doc_destino, contenido) do
@@ -443,7 +578,7 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["mensajes", doc], sesion) do
+  defp procesar_comando([cmd, doc], sesion) when cmd in ["list_family_messages", "mensajes"] do
     msgs = FamiliaresServer.listar_mensajes(doc)
 
     if msgs == [] do
@@ -462,18 +597,40 @@ defmodule Emergencia.CLI do
 
   # --- MASCOTAS ---
 
+  # Formato oficial (7 args): report_pet lost perro "Luna" negra mediana zona_norte contacto
+  defp procesar_comando([cmd, tipo_str, especie, nombre, color, tamano, zona, contacto], sesion)
+       when cmd in ["report_pet", "mascota_reportar"] do
+    tipo = normalizar_tipo_mascota(tipo_str)
+
+    case MascotasServer.reportar_mascota(tipo, especie, nombre, color, color, tamano, zona, contacto, nil) do
+      {:ok, m} ->
+        cod = OperacionesExtendidas.id_de(m)
+        t = Map.get(m, :tipo_reporte) || Map.get(m, :tipo)
+        IO.puts("[OK] Reporte de mascota #{cod} (#{t}) registrado en zona #{m.zona}.")
+
+      err ->
+        imprimir_error(err)
+    end
+
+    {:ok, sesion}
+  end
+
+  # Formato extendido (8 o 9 args): report_pet lost perro "Luna" "collar rojo" negra mediana zona_norte contacto [id]
   defp procesar_comando(
-         ["mascota_reportar", tipo_str, especie, nombre, caract, color, tamano, zona, contacto | resto],
+         [cmd, tipo_str, especie, nombre, caract, color, tamano, zona, contacto | resto],
          sesion
-       ) do
+       )
+       when cmd in ["report_pet", "mascota_reportar"] do
     id_opc =
       case resto do
         [id | _] -> id
         [] -> nil
       end
 
+    tipo = normalizar_tipo_mascota(tipo_str)
+
     case MascotasServer.reportar_mascota(
-           String.to_atom(tipo_str),
+           tipo,
            especie,
            nombre,
            caract,
@@ -485,8 +642,8 @@ defmodule Emergencia.CLI do
          ) do
       {:ok, m} ->
         cod = OperacionesExtendidas.id_de(m)
-        tipo = Map.get(m, :tipo_reporte) || Map.get(m, :tipo)
-        IO.puts("[OK] Reporte de mascota #{cod} (#{tipo}) registrado en zona #{m.zona}.")
+        t = Map.get(m, :tipo_reporte) || Map.get(m, :tipo)
+        IO.puts("[OK] Reporte de mascota #{cod} (#{t}) registrado en zona #{m.zona}.")
 
       err ->
         imprimir_error(err)
@@ -495,7 +652,7 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["mascota_coincidencias"], sesion) do
+  defp procesar_comando([cmd], sesion) when cmd in ["match_pets", "mascota_coincidencias"] do
     parejas = OperacionesExtendidas.buscar_coincidencias_mascotas()
 
     if parejas == [] do
@@ -513,7 +670,8 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  defp procesar_comando(["mascota_confirmar", id_perdida, id_encontrada], sesion) do
+  defp procesar_comando([cmd, id_perdida, id_encontrada], sesion)
+       when cmd in ["confirm_pet_match", "mascota_confirmar"] do
     case MascotasServer.confirmar_coincidencia(id_perdida, id_encontrada) do
       {:ok, res} ->
         IO.puts("[OK] Coincidencia confirmada: #{inspect(res)}")
@@ -568,8 +726,15 @@ defmodule Emergencia.CLI do
     IO.puts("Stock inicial (#{rec_id}): 50 litros.")
     IO.puts("Lanzando 2 procesos simultáneos: Proceso A pide 30L y Proceso B pide 25L...")
 
-    t1 = Task.async(fn -> {:proceso_a, InventarioServer.asignar_recurso(OperacionesExtendidas.id_de(n1), rec_id, 30)} end)
-    t2 = Task.async(fn -> {:proceso_b, InventarioServer.asignar_recurso(OperacionesExtendidas.id_de(n2), rec_id, 25)} end)
+    t1 =
+      Task.async(fn ->
+        {:proceso_a, InventarioServer.asignar_recurso(OperacionesExtendidas.id_de(n1), rec_id, 30)}
+      end)
+
+    t2 =
+      Task.async(fn ->
+        {:proceso_b, InventarioServer.asignar_recurso(OperacionesExtendidas.id_de(n2), rec_id, 25)}
+      end)
 
     resultados = Task.await_many([t1, t2])
 
@@ -588,8 +753,89 @@ defmodule Emergencia.CLI do
   end
 
   # ============================================================================
-  # AUXILIARES
+  # AUXILIARES Y NORMALIZACIÓN
   # ============================================================================
+
+  defp parsear_filtros_necesidades(tokens) do
+    Enum.reduce(tokens, {nil, nil}, fn tok, {z, p} ->
+      cond do
+        String.starts_with?(tok, "zona=") ->
+          {String.replace_prefix(tok, "zona=", ""), p}
+
+        String.starts_with?(tok, "prioridad=") ->
+          {z, String.replace_prefix(tok, "prioridad=", "")}
+
+        is_nil(z) ->
+          {tok, p}
+
+        is_nil(p) ->
+          {z, tok}
+
+        true ->
+          {z, p}
+      end
+    end)
+  end
+
+  defp normalizar_atomo(str) do
+    str
+    |> to_string()
+    |> String.trim()
+    |> String.downcase()
+    |> String.replace("á", "a")
+    |> String.replace("é", "e")
+    |> String.replace("í", "i")
+    |> String.replace("ó", "o")
+    |> String.replace("ú", "u")
+    |> String.to_atom()
+  end
+
+  defp normalizar_tipo_mascota(str) do
+    case String.downcase(String.trim(to_string(str))) do
+      "lost" -> :perdida
+      "perdida" -> :perdida
+      "found" -> :encontrada
+      "encontrada" -> :encontrada
+      otro -> normalizar_atomo(otro)
+    end
+  end
+
+  defp normalizar_estado_persona(str) do
+    case String.downcase(String.trim(to_string(str))) do
+      "localizada" -> :localizada
+      "localizado" -> :localizada
+      "desaparecida" -> :desaparecida
+      "desaparecido" -> :desaparecida
+      "herida" -> :herida
+      "herido" -> :herida
+      "en_albergue" -> :en_albergue
+      otro -> normalizar_atomo(otro)
+    end
+  end
+
+  defp inferir_categoria(nombre) do
+    n = String.downcase(to_string(nombre))
+
+    cond do
+      String.contains?(n, "agua") -> "hidratacion"
+      String.contains?(n, "alimento") or String.contains?(n, "comida") -> "alimentacion"
+      String.contains?(n, "medic") or String.contains?(n, "botiquin") -> "salud"
+      String.contains?(n, "frazada") or String.contains?(n, "carpa") -> "abrigo"
+      true -> "general"
+    end
+  end
+
+  defp inferir_zona_ubicacion(ubicacion) do
+    u = String.downcase(to_string(ubicacion))
+
+    cond do
+      String.contains?(u, "norte") -> "zona_norte"
+      String.contains?(u, "sur") -> "zona_sur"
+      String.contains?(u, "este") -> "zona_este"
+      String.contains?(u, "oeste") -> "zona_oeste"
+      true -> "centro"
+    end
+  end
 
   defp verificar_permiso(%{usuario: nil}, _accion) do
     {:error, :debe_iniciar_sesion_con_connect}
@@ -620,32 +866,29 @@ defmodule Emergencia.CLI do
 
   defp mostrar_ayuda do
     [
-      "Comandos disponibles (usa comillas dobles para textos con espacios):",
-      "  connect <user> <pass> <rol> <zona> [nombre]   - Inicia sesión (roles: coordinador, voluntario, ciudadano, organizacion)",
+      "Comandos oficiales del sistema (usa comillas dobles para textos con espacios):",
+      "  connect <user> <pass> <rol> <zona> [nombre]   - Inicia sesión (coordinador, voluntario, ciudadano, organizacion)",
       "  whoami | disconnect | salir                   - Sesión actual, cerrar sesión o salir",
-      "  zona_registrar <cod> <nombre> <riesgo> <afec> - Registra zona (bajo, medio, alto, critico)",
-      "  sector_agregar <z_cod> <s_cod> <nom> <r> <af> - Agrega sector a zona",
-      "  punto_agregar <z_cod> <s_cod> <p_cod> <n> <t> - Agrega punto de atención",
-      "  zona_stats <zona_cod>                         - Estadísticas recursivas de zona",
-      "  recurso_registrar <id> <nom> <cat> <cant> <u_med> <ubic> <zona>",
-      "  recurso_transferir <rec_id> <ubic_dest> <zona_dest> <cant>",
-      "  recursos [zona]                               - Lista lotes de inventario",
-      "  inventario <nombre_recurso> [zona]            - Stock total recursivo",
-      "  necesidad_registrar <tipo> <cant> <prio> <zona> <desc>",
-      "  necesidades [zona] [prioridad]                - Lista necesidades ordenadas por prioridad",
-      "  recurso_asignar <necesidad_id> <recurso_id> <cant>",
-      "  albergue_registrar <id> <nombre> <zona> <capacidad>",
-      "  albergue_ingreso <albergue_id> <documento>",
-      "  albergue_salida <albergue_id> <documento>",
-      "  albergue_consultar <id> | albergues_reporte   - Cupos disponibles y ranking de ocupación",
-      "  persona_reportar <doc> <nombre> <zona> <estado> <edad>",
-      "  persona_buscar <criterio>                     - Busca por documento, nombre, zona o estado",
-      "  mensaje_enviar <doc_destino> <contenido>",
-      "  mensajes <doc>",
-      "  mascota_reportar <perdida|encontrada> <esp> <nom> <caract> <color> <tam> <zona> <contacto> [id]",
-      "  mascota_coincidencias                         - Lista posibles parejas con puntaje de similitud",
-      "  mascota_confirmar <id_perdida> <id_encontrada>",
-      "  resumen (o summary)                           - Vista consolidada global del sistema",
+      "  register_zone <codigo> <nombre> <nivel> [afec]",
+      "  zone_stats <zona_cod>                         - Estadísticas recursivas de zona",
+      "  register_resource <id> <nom> <cant> <u_med> <ubic>",
+      "  list_resources [zona] | critical_resources    - Inventario y recursos con stock crítico",
+      "  transfer_resource <id> <origen> <destino> <cant>",
+      "  register_need <tipo> <cant> <prio> <zona> <desc>",
+      "  list_needs [zona=X] [prioridad=Y]             - Lista necesidades ordenadas por prioridad",
+      "  pending_needs                                 - Lista necesidades pendientes/parciales",
+      "  assign_resource <need_id> <recurso_o_id> <cant>",
+      "  register_shelter <id> <nombre> <zona> <capacidad>",
+      "  check_shelter <id> | shelters_report          - Cupos disponibles y ranking de ocupación",
+      "  register_entry <albergue_id> <documento>",
+      "  register_exit <albergue_id> <documento>",
+      "  report_person <doc> <nombre> <zona> <estado> [edad]",
+      "  find_person <criterio>                        - Búsqueda recursiva de familiares",
+      "  send_family_message <doc> <mensaje>",
+      "  list_family_messages <doc>",
+      "  report_pet <lost|found> <esp> <nom> <color> <tam> <zona> <contacto>",
+      "  match_pets | confirm_pet_match <id_p> <id_e>",
+      "  summary (o resumen)                           - Vista consolidada global del sistema",
       "  simular_concurrencia                          - Prueba de carrera en inventario en vivo"
     ]
     |> Enum.each(&IO.puts/1)

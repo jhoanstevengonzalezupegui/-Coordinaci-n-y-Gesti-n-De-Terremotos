@@ -1,4 +1,6 @@
-R01|agua|hidratacion|100|litros|acopio_centro|centro|2026-11-16T20:11:46Z~entrada_inicial~100~Registro inicial en acopio_centro
+R001|agua|hidratacion|40|litros|centro_acopio_1|centro|2026-11-16T23:18:17Z~asignacion~10~Asignado a necesidad N007;2026-11-16T23:16:40Z~entrada_inicial~50~Registro inicial en centro_acopio_1
+R001_T3203|agua|hidratacion|10|litros|albergue_2|centro|2026-11-16T23:18:17Z~entrada_inicial~10~Registro inicial en albergue_2
+R01|agua|hidratacion|70|litros|acopio_centro|centro|2026-11-16T23:16:58Z~asignacion~30~Asignado a necesidad N001;2026-11-16T20:11:46Z~entrada_inicial~100~Registro inicial en acopio_centro
 R02|frazadas|abrigo|60|unidades|acopio_centro|centro|2026-11-16T22:02:13Z~asignacion~20~Asignado a necesidad N004;2026-11-16T20:11:46Z~entrada_inicial~80~Registro inicial en acopio_centro
 R02_T2|frazadas|abrigo|20|unidades|albergue_norte|norte|2026-11-16T22:02:13Z~entrada_inicial~20~Registro inicial en albergue_norte
 R03|botiquin|salud|30|kits|carpa_medica|centro|2026-11-16T20:11:46Z~entrada_inicial~30~Registro inicial en carpa_medica

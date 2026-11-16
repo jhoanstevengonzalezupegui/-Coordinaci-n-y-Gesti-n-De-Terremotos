@@ -1,7 +1,7 @@
 defmodule Emergencia.OperacionesExtendidas do
   @moduledoc """
   Operaciones complementarias de consulta, reportes consolidados, búsqueda de
-  coincidencias y transferencia entre centros de apoyo sobre los servidores OTP.
+  coincidencias, asignación por nombre de recurso y transferencia entre centros.
   """
 
   alias Emergencia.Servidores.{
@@ -24,8 +24,82 @@ defmodule Emergencia.OperacionesExtendidas do
   ]
 
   # ============================================================================
-  # 1. TRANSFERENCIA DE RECURSOS ENTRE CENTROS DE APOYO (Req. 1.4.5)
+  # 1. ASIGNACIÓN FLEXIBLE POR ID DE LOTE O NOMBRE DE RECURSO (Req. 1.4.4 / 1.4.5)
   # ============================================================================
+
+  def asignar_recurso_flexible(necesidad_id, recurso_id_o_nombre, cantidad)
+      when is_integer(cantidad) and cantidad > 0 do
+    recursos = listar_recursos(nil)
+    criterio = String.downcase(to_string(recurso_id_o_nombre))
+
+    case Enum.find(recursos, fn r -> String.downcase(to_string(id_de(r))) == criterio end) do
+      %{} = lote_exacto ->
+        InventarioServer.asignar_recurso(necesidad_id, id_de(lote_exacto), cantidad)
+
+      nil ->
+        candidatos =
+          recursos
+          |> Enum.filter(fn r ->
+            String.downcase(to_string(Map.get(r, :nombre, ""))) == criterio and
+              Map.get(r, :cantidad_disponible, 0) > 0
+          end)
+          |> Enum.sort_by(fn r -> Map.get(r, :cantidad_disponible, 0) end, :desc)
+
+        total_disp = Enum.reduce(candidatos, 0, fn r, acc -> acc + Map.get(r, :cantidad_disponible, 0) end)
+
+        cond do
+          candidatos == [] ->
+            {:error, :recurso_no_encontrado}
+
+          total_disp < cantidad ->
+            {:error, :inventario_insuficiente}
+
+          true ->
+            asignar_en_lotes(necesidad_id, candidatos, cantidad, [])
+        end
+    end
+  end
+
+  def asignar_recurso_flexible(_, _, _), do: {:error, :cantidad_invalida}
+
+  defp asignar_en_lotes(_necesidad_id, _lotes, 0, asignaciones), do: {:ok, Enum.reverse(asignaciones)}
+  defp asignar_en_lotes(_necesidad_id, [], _restante, _asignaciones), do: {:error, :inventario_insuficiente}
+
+  defp asignar_en_lotes(necesidad_id, [lote | resto], restante, asignaciones) do
+    disp = Map.get(lote, :cantidad_disponible, 0)
+    tomar = min(disp, restante)
+
+    case InventarioServer.asignar_recurso(necesidad_id, id_de(lote), tomar) do
+      {:ok, res} ->
+        asignar_en_lotes(necesidad_id, resto, restante - tomar, [res | asignaciones])
+
+      error ->
+        error
+    end
+  end
+
+  # ============================================================================
+  # 2. TRANSFERENCIA DE RECURSOS ENTRE CENTROS DE APOYO (Req. 1.4.5)
+  # ============================================================================
+
+  def transferir_desde_origen(recurso_id, ubicacion_origen, ubicacion_destino, cantidad, usuario \\ "sistema") do
+    recursos = listar_recursos(nil)
+
+    case Enum.find(recursos, fn r -> id_de(r) == recurso_id end) do
+      nil ->
+        {:error, :recurso_no_encontrado}
+
+      rec ->
+        origen_actual = to_string(Map.get(rec, :ubicacion, ""))
+
+        if String.downcase(origen_actual) != String.downcase(to_string(ubicacion_origen)) do
+          {:error, {:ubicacion_origen_no_coincide, origen_actual}}
+        else
+          zona_dest = inferir_zona_destino(ubicacion_destino, Map.get(rec, :zona, "centro"))
+          transferir_recurso(recurso_id, ubicacion_destino, zona_dest, cantidad, usuario)
+        end
+    end
+  end
 
   def transferir_recurso(recurso_id, ubicacion_destino, zona_destino, cantidad, usuario \\ "sistema")
 
@@ -90,8 +164,29 @@ defmodule Emergencia.OperacionesExtendidas do
 
   def transferir_recurso(_, _, _, _, _), do: {:error, :cantidad_invalida}
 
+  defp inferir_zona_destino(ubicacion_destino, zona_por_defecto) do
+    dest_norm = String.downcase(to_string(ubicacion_destino))
+
+    albergue =
+      :sys.get_state(AlberguesServer)
+      |> extraer_lista([:albergues])
+      |> Enum.find(fn a ->
+        String.downcase(to_string(id_de(a))) == dest_norm or
+          String.downcase(to_string(Map.get(a, :nombre, ""))) == dest_norm
+      end)
+
+    cond do
+      albergue != nil -> Map.get(albergue, :zona, zona_por_defecto)
+      String.contains?(dest_norm, "norte") -> "zona_norte"
+      String.contains?(dest_norm, "sur") -> "zona_sur"
+      String.contains?(dest_norm, "este") -> "zona_este"
+      String.contains?(dest_norm, "oeste") -> "zona_oeste"
+      true -> zona_por_defecto
+    end
+  end
+
   # ============================================================================
-  # 2. LISTADO RECURSIVO DE RECURSOS Y NECESIDADES (Req. 1.4.4 y 1.4.5)
+  # 3. LISTADO RECURSIVO DE RECURSOS, CRÍTICOS Y NECESIDADES (Req. 1.4.4 y 1.4.5)
   # ============================================================================
 
   def listar_recursos(zona \\ nil) do
@@ -115,11 +210,29 @@ defmodule Emergencia.OperacionesExtendidas do
     end
   end
 
+  def recursos_criticos(umbral \\ 30) do
+    listar_recursos(nil)
+    |> filtrar_criticos_rec(umbral, [])
+    |> Enum.sort_by(fn r -> Map.get(r, :cantidad_disponible, 0) end, :asc)
+  end
+
+  defp filtrar_criticos_rec([], _umbral, acc), do: acc
+
+  defp filtrar_criticos_rec([r | resto], umbral, acc) do
+    nuevo_acc = if Map.get(r, :cantidad_disponible, 0) <= umbral, do: [r | acc], else: acc
+    filtrar_criticos_rec(resto, umbral, nuevo_acc)
+  end
+
   def listar_necesidades(zona \\ nil, prioridad \\ nil) do
     :sys.get_state(InventarioServer)
     |> extraer_lista([:necesidades])
     |> filtrar_necesidades_rec(zona, prioridad, [])
     |> ordenar_necesidades_rec()
+  end
+
+  def listar_necesidades_pendientes do
+    listar_necesidades(nil, nil)
+    |> Enum.filter(fn n -> Map.get(n, :estado) in [:pendiente, :parcial] end)
   end
 
   defp filtrar_necesidades_rec([], _zona, _prio, acc), do: acc
@@ -162,7 +275,7 @@ defmodule Emergencia.OperacionesExtendidas do
   defp peso_prioridad(_), do: 1
 
   # ============================================================================
-  # 3. BÚSQUEDA RECURSIVA DE FAMILIARES (Req. 1.4.6)
+  # 4. BÚSQUEDA RECURSIVA DE FAMILIARES (Req. 1.4.6)
   # ============================================================================
 
   def buscar_personas(criterio) do
@@ -193,7 +306,7 @@ defmodule Emergencia.OperacionesExtendidas do
   end
 
   # ============================================================================
-  # 4. MOTOR RECURSIVO DE COINCIDENCIAS DE MASCOTAS (Req. 1.4.7)
+  # 5. MOTOR RECURSIVO DE COINCIDENCIAS DE MASCOTAS (Req. 1.4.7)
   # ============================================================================
 
   def buscar_coincidencias_mascotas do
@@ -263,7 +376,7 @@ defmodule Emergencia.OperacionesExtendidas do
   defp norm(val), do: val |> to_string() |> String.trim() |> String.downcase()
 
   # ============================================================================
-  # 5. CONSULTA Y REPORTE DE OCUPACIÓN DE ALBERGUES (Req. 1.4.8)
+  # 6. CONSULTA Y REPORTE DE OCUPACIÓN DE ALBERGUES (Req. 1.4.8)
   # ============================================================================
 
   def consultar_albergue(id) do
@@ -318,7 +431,7 @@ defmodule Emergencia.OperacionesExtendidas do
   end
 
   # ============================================================================
-  # 6. RESUMEN GLOBAL DEL SISTEMA (Req. 1.4.10 - summary)
+  # 7. RESUMEN GLOBAL DEL SISTEMA (Req. 1.4.10 - summary)
   # ============================================================================
 
   def resumen_global do

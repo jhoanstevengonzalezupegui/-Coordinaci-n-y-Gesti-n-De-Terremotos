@@ -1,1 +1,2 @@
 MSG001|2026-11-16T20:11:46Z|laura|1094555|Estamos bien en el Albergue Central|pendiente
+MSG002|2026-11-16T23:19:38Z|laura|1094888|Estoy bien, estoy en el albergue norte|pendiente
