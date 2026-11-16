@@ -1,0 +1,4 @@
+N001|agua|Agua potable urgente|40|0|centro|critica|laura|general|pendiente|2026-11-16T21:57:59Z
+N002|agua|Hospital Centro|30|30|centro|critica|coord1|general|atendida|2026-11-16T21:58:16Z
+N003|agua|Refugio Sur|25|0|centro|alta|coord2|general|pendiente|2026-11-16T21:58:16Z
+N004|otra|Transferencia interna de acopio_centro (centro) hacia albergue_norte (norte)|20|20|norte|alta|laura|transferencia|atendida|2026-11-16T22:02:13Z

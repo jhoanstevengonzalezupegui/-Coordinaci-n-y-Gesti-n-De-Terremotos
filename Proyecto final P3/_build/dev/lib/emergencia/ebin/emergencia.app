@@ -14,6 +14,7 @@
                         'Elixir.Emergencia.Modelos.Recurso',
                         'Elixir.Emergencia.Modelos.Usuario',
                         'Elixir.Emergencia.Modelos.Zona',
+                        'Elixir.Emergencia.OperacionesExtendidas',
                         'Elixir.Emergencia.Persistencia',
                         'Elixir.Emergencia.Servidores.AlberguesServer',
                         'Elixir.Emergencia.Servidores.FamiliaresServer',

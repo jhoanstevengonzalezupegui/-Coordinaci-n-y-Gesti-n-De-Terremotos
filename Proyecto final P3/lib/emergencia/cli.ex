@@ -4,6 +4,8 @@ defmodule Emergencia.CLI do
   de Gestión de Emergencias.
   """
 
+  alias Emergencia.OperacionesExtendidas
+
   alias Emergencia.Servidores.{
     AlberguesServer,
     FamiliaresServer,
@@ -172,7 +174,7 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  # --- INVENTARIO Y NECESIDADES ---
+  # --- INVENTARIO, TRANSFERENCIAS Y NECESIDADES ---
 
   defp procesar_comando(
          ["recurso_registrar", id, nombre, categoria, cant_str, unidad, ubicacion, zona],
@@ -182,10 +184,50 @@ defmodule Emergencia.CLI do
          {cantidad, ""} <- Integer.parse(cant_str),
          {:ok, rec} <-
            InventarioServer.registrar_recurso(id, nombre, categoria, cantidad, unidad, ubicacion, zona) do
+      cod = OperacionesExtendidas.id_de(rec)
       u_med = Map.get(rec, :unidad) || Map.get(rec, :unidad_medida, "unidades")
-      IO.puts("[OK] Recurso #{rec.id} (#{rec.nombre}): #{rec.cantidad_disponible} #{u_med} en #{rec.zona}.")
+      IO.puts("[OK] Recurso #{cod} (#{rec.nombre}): #{rec.cantidad_disponible} #{u_med} en #{rec.zona}.")
     else
       err -> imprimir_error(err)
+    end
+
+    {:ok, sesion}
+  end
+
+  defp procesar_comando(["recurso_transferir", rec_id, ubic_dest, zona_dest, cant_str], sesion) do
+    usuario = if sesion.usuario, do: sesion.usuario.username, else: "anonimo"
+
+    with {:ok, _} <- verificar_permiso(sesion, :asignar_recurso),
+         {cantidad, ""} <- Integer.parse(cant_str),
+         {:ok, info} <-
+           OperacionesExtendidas.transferir_recurso(rec_id, ubic_dest, zona_dest, cantidad, usuario) do
+      IO.puts(
+        "[OK] Transferidos #{info.cantidad_transferida} de '#{info.recurso}' desde #{info.origen_id} hacia #{info.ubicacion_destino} (#{info.zona_destino}) -> Nuevo lote: #{info.destino_id}."
+      )
+    else
+      err -> imprimir_error(err)
+    end
+
+    {:ok, sesion}
+  end
+
+  defp procesar_comando(["recursos" | resto], sesion) do
+    zona = List.first(resto)
+    lista = OperacionesExtendidas.listar_recursos(zona)
+
+    if lista == [] do
+      IO.puts("No hay recursos registrados para el filtro indicado.")
+    else
+      IO.puts("--- Inventario de Recursos ---")
+
+      Enum.each(lista, fn r ->
+        cod = OperacionesExtendidas.id_de(r)
+        u_med = Map.get(r, :unidad) || Map.get(r, :unidad_medida, "unidades")
+
+        IO.puts(
+          "  [#{cod}] #{r.nombre} (#{r.categoria}): #{r.cantidad_disponible} #{u_med} | Ubic: #{r.ubicacion} | Zona: #{r.zona}"
+        )
+      end)
     end
 
     {:ok, sesion}
@@ -207,9 +249,40 @@ defmodule Emergencia.CLI do
              "general",
              nil
            ) do
-      IO.puts("[OK] Necesidad registrada con ID: #{nec.id} (Prioridad: #{nec.prioridad}, Cantidad: #{nec.cantidad})")
+      cod = OperacionesExtendidas.id_de(nec)
+      cant = Map.get(nec, :cantidad) || Map.get(nec, :cantidad_requerida)
+      IO.puts("[OK] Necesidad registrada con ID: #{cod} (Prioridad: #{nec.prioridad}, Cantidad: #{cant})")
     else
       err -> imprimir_error(err)
+    end
+
+    {:ok, sesion}
+  end
+
+  defp procesar_comando(["necesidades" | resto], sesion) do
+    {zona, prio} =
+      case resto do
+        [] -> {nil, nil}
+        [z] -> {z, nil}
+        [z, p | _] -> {z, p}
+      end
+
+    lista = OperacionesExtendidas.listar_necesidades(zona, prio)
+
+    if lista == [] do
+      IO.puts("No hay necesidades registradas con ese criterio.")
+    else
+      IO.puts("--- Necesidades Ordenadas por Prioridad ---")
+
+      Enum.each(lista, fn n ->
+        cod = OperacionesExtendidas.id_de(n)
+        tipo = Map.get(n, :tipo) || Map.get(n, :categoria, :general)
+        cant = Map.get(n, :cantidad) || Map.get(n, :cantidad_requerida, 0)
+
+        IO.puts(
+          "  [#{cod}] Prio: #{n.prioridad} | Estado: #{n.estado} | #{tipo} (#{cant}) | Zona: #{n.zona} | #{n.descripcion}"
+        )
+      end)
     end
 
     {:ok, sesion}
@@ -245,7 +318,9 @@ defmodule Emergencia.CLI do
     with {:ok, _} <- verificar_permiso(sesion, :gestionar_albergue),
          {capacidad, ""} <- Integer.parse(cap_str),
          {:ok, alb} <- AlberguesServer.registrar_albergue(id, nombre, zona, capacidad) do
-      IO.puts("[OK] Albergue #{alb.id} (#{alb.nombre}) creado con capacidad #{alb.capacidad_maxima}.")
+      cod = OperacionesExtendidas.id_de(alb)
+      cap = Map.get(alb, :capacidad_maxima) || Map.get(alb, :capacidad)
+      IO.puts("[OK] Albergue #{cod} (#{alb.nombre}) creado con capacidad #{cap}.")
     else
       err -> imprimir_error(err)
     end
@@ -256,7 +331,10 @@ defmodule Emergencia.CLI do
   defp procesar_comando(["albergue_ingreso", albergue_id, documento], sesion) do
     with {:ok, _} <- verificar_permiso(sesion, :gestionar_albergue),
          {:ok, alb} <- AlberguesServer.registrar_ingreso(albergue_id, documento) do
-      IO.puts("[OK] Ingreso registrado en #{alb.id}. Ocupación actual: #{MapSet.size(alb.ocupantes)}/#{alb.capacidad_maxima}.")
+      cod = OperacionesExtendidas.id_de(alb)
+      cap = Map.get(alb, :capacidad_maxima) || Map.get(alb, :capacidad)
+      ocup = MapSet.size(Map.get(alb, :personas_alojadas, MapSet.new()))
+      IO.puts("[OK] Ingreso registrado en #{cod}. Ocupación actual: #{ocup}/#{cap}.")
     else
       err -> imprimir_error(err)
     end
@@ -267,9 +345,45 @@ defmodule Emergencia.CLI do
   defp procesar_comando(["albergue_salida", albergue_id, documento], sesion) do
     with {:ok, _} <- verificar_permiso(sesion, :gestionar_albergue),
          {:ok, alb} <- AlberguesServer.registrar_salida(albergue_id, documento) do
-      IO.puts("[OK] Salida registrada en #{alb.id}. Ocupación actual: #{MapSet.size(alb.ocupantes)}/#{alb.capacidad_maxima}.")
+      cod = OperacionesExtendidas.id_de(alb)
+      cap = Map.get(alb, :capacidad_maxima) || Map.get(alb, :capacidad)
+      ocup = MapSet.size(Map.get(alb, :personas_alojadas, MapSet.new()))
+      IO.puts("[OK] Salida registrada en #{cod}. Ocupación actual: #{ocup}/#{cap}.")
     else
       err -> imprimir_error(err)
+    end
+
+    {:ok, sesion}
+  end
+
+  defp procesar_comando(["albergue_consultar", albergue_id], sesion) do
+    case OperacionesExtendidas.consultar_albergue(albergue_id) do
+      {:ok, info} ->
+        IO.puts("--- Albergue #{info.id}: #{info.nombre} (Zona: #{info.zona}) ---")
+        IO.puts("  Ocupación   : #{info.ocupados}/#{info.capacidad} (#{info.porcentaje}%)")
+        IO.puts("  Disponibles : #{info.disponibles} cupos")
+        IO.puts("  Ocupantes   : #{inspect(info.lista_ocupantes)}")
+
+      err ->
+        imprimir_error(err)
+    end
+
+    {:ok, sesion}
+  end
+
+  defp procesar_comando(["albergues_reporte"], sesion) do
+    reporte = OperacionesExtendidas.reporte_albergues()
+
+    if reporte == [] do
+      IO.puts("No hay albergues registrados.")
+    else
+      IO.puts("--- Reporte de Albergues por Ocupación ---")
+
+      Enum.each(reporte, fn a ->
+        IO.puts(
+          "  [#{a.id}] #{a.nombre} (#{a.zona}): #{a.ocupados}/#{a.capacidad} (#{a.porcentaje}%) - Libres: #{a.disponibles}"
+        )
+      end)
     end
 
     {:ok, sesion}
@@ -295,12 +409,32 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
+  defp procesar_comando(["persona_buscar", criterio], sesion) do
+    resultados = OperacionesExtendidas.buscar_personas(criterio)
+
+    if resultados == [] do
+      IO.puts("No se encontraron personas con el criterio '#{criterio}'.")
+    else
+      IO.puts("--- Personas Encontradas ---")
+
+      Enum.each(resultados, fn p ->
+        hist = Map.get(p, :historial_estados, [])
+        IO.puts(
+          "  Doc: #{p.documento} | #{p.nombre} (Edad: #{p.edad}) | Zona: #{p.zona} | Estado: #{p.estado} | Historial: #{inspect(hist)}"
+        )
+      end)
+    end
+
+    {:ok, sesion}
+  end
+
   defp procesar_comando(["mensaje_enviar", doc_destino, contenido], sesion) do
     remitente = if sesion.usuario, do: sesion.usuario.username, else: "familiar_externo"
 
     case FamiliaresServer.enviar_mensaje(remitente, doc_destino, contenido) do
       {:ok, msg} ->
-        IO.puts("[OK] Mensaje #{msg.id} enviado para documento #{doc_destino}.")
+        cod = OperacionesExtendidas.id_de(msg)
+        IO.puts("[OK] Mensaje #{cod} enviado para documento #{doc_destino}.")
 
       err ->
         imprimir_error(err)
@@ -318,7 +452,8 @@ defmodule Emergencia.CLI do
       IO.puts("--- Mensajes para #{doc} ---")
 
       Enum.each(msgs, fn m ->
-        IO.puts("  [#{m.id}] De #{m.remitente} (#{m.estado}): #{m.contenido}")
+        cod = OperacionesExtendidas.id_de(m)
+        IO.puts("  [#{cod}] De #{m.remitente} (#{m.estado}): #{m.contenido}")
       end)
     end
 
@@ -349,10 +484,30 @@ defmodule Emergencia.CLI do
            id_opc
          ) do
       {:ok, m} ->
-        IO.puts("[OK] Reporte de mascota #{m.id} (#{m.tipo_reporte}) registrado en zona #{m.zona}.")
+        cod = OperacionesExtendidas.id_de(m)
+        tipo = Map.get(m, :tipo_reporte) || Map.get(m, :tipo)
+        IO.puts("[OK] Reporte de mascota #{cod} (#{tipo}) registrado en zona #{m.zona}.")
 
       err ->
         imprimir_error(err)
+    end
+
+    {:ok, sesion}
+  end
+
+  defp procesar_comando(["mascota_coincidencias"], sesion) do
+    parejas = OperacionesExtendidas.buscar_coincidencias_mascotas()
+
+    if parejas == [] do
+      IO.puts("No se encontraron posibles coincidencias activas.")
+    else
+      IO.puts("--- Posibles Coincidencias de Mascotas ---")
+
+      Enum.each(parejas, fn c ->
+        IO.puts(
+          "  Perdida: #{c.id_perdida} (#{c.nombre_perdida}) <-> Encontrada: #{c.id_encontrada} | #{c.especie} en #{c.zona} | Similitud: #{c.puntaje}%"
+        )
+      end)
     end
 
     {:ok, sesion}
@@ -370,7 +525,32 @@ defmodule Emergencia.CLI do
     {:ok, sesion}
   end
 
-  # --- DEMOSTRACIÓN DE CONCURRENCIA ---
+  # --- RESUMEN GLOBAL Y CONCURRENCIA ---
+
+  defp procesar_comando([cmd], sesion) when cmd in ["resumen", "summary"] do
+    r = OperacionesExtendidas.resumen_global()
+    IO.puts("\n================ RESUMEN GLOBAL DE EMERGENCIA ================")
+    IO.puts("Zonas afectadas registradas : #{r.total_zonas}")
+    IO.puts("Necesidades               : #{r.necesidades_pendientes} pendientes / #{r.necesidades_atendidas} atendidas")
+    IO.puts("Personas reportadas       : #{r.total_personas} | Mensajes familiares: #{r.total_mensajes}")
+    IO.puts("Mascotas                  : #{r.mascotas_activas} activas / #{r.mascotas_resueltas} resueltas")
+    IO.puts("Recursos en inventario:")
+
+    Enum.each(r.recursos, fn rec ->
+      cod = OperacionesExtendidas.id_de(rec)
+      u_med = Map.get(rec, :unidad) || Map.get(rec, :unidad_medida, "unidades")
+      IO.puts("  - [#{cod}] #{rec.nombre}: #{rec.cantidad_disponible} #{u_med} (#{rec.ubicacion} @ #{rec.zona})")
+    end)
+
+    IO.puts("Albergues:")
+
+    Enum.each(r.albergues, fn a ->
+      IO.puts("  - [#{a.id}] #{a.nombre} (#{a.zona}): #{a.ocupados}/#{a.capacidad} cupos (#{a.porcentaje}%)")
+    end)
+
+    IO.puts("==============================================================\n")
+    {:ok, sesion}
+  end
 
   defp procesar_comando(["simular_concurrencia"], sesion) do
     IO.puts("\n--- Simulación de Conflicto Concurrente sobre Inventario ---")
@@ -388,8 +568,8 @@ defmodule Emergencia.CLI do
     IO.puts("Stock inicial (#{rec_id}): 50 litros.")
     IO.puts("Lanzando 2 procesos simultáneos: Proceso A pide 30L y Proceso B pide 25L...")
 
-    t1 = Task.async(fn -> {:proceso_a, InventarioServer.asignar_recurso(n1.id, rec_id, 30)} end)
-    t2 = Task.async(fn -> {:proceso_b, InventarioServer.asignar_recurso(n2.id, rec_id, 25)} end)
+    t1 = Task.async(fn -> {:proceso_a, InventarioServer.asignar_recurso(OperacionesExtendidas.id_de(n1), rec_id, 30)} end)
+    t2 = Task.async(fn -> {:proceso_b, InventarioServer.asignar_recurso(OperacionesExtendidas.id_de(n2), rec_id, 25)} end)
 
     resultados = Task.await_many([t1, t2])
 
@@ -442,26 +622,31 @@ defmodule Emergencia.CLI do
     [
       "Comandos disponibles (usa comillas dobles para textos con espacios):",
       "  connect <user> <pass> <rol> <zona> [nombre]   - Inicia sesión (roles: coordinador, voluntario, ciudadano, organizacion)",
-      "  whoami                                        - Muestra usuario actual",
-      "  disconnect                                    - Cierra sesión actual",
-      "  zona_registrar <cod> <nombre> <riesgo> <afec> - Registra zona (riesgo: bajo, medio, alto, critico)",
+      "  whoami | disconnect | salir                   - Sesión actual, cerrar sesión o salir",
+      "  zona_registrar <cod> <nombre> <riesgo> <afec> - Registra zona (bajo, medio, alto, critico)",
       "  sector_agregar <z_cod> <s_cod> <nom> <r> <af> - Agrega sector a zona",
       "  punto_agregar <z_cod> <s_cod> <p_cod> <n> <t> - Agrega punto de atención",
-      "  zona_stats <zona_cod>                         - Calcula estadísticas recursivas de zona",
+      "  zona_stats <zona_cod>                         - Estadísticas recursivas de zona",
       "  recurso_registrar <id> <nom> <cat> <cant> <u_med> <ubic> <zona>",
+      "  recurso_transferir <rec_id> <ubic_dest> <zona_dest> <cant>",
+      "  recursos [zona]                               - Lista lotes de inventario",
+      "  inventario <nombre_recurso> [zona]            - Stock total recursivo",
       "  necesidad_registrar <tipo> <cant> <prio> <zona> <desc>",
+      "  necesidades [zona] [prioridad]                - Lista necesidades ordenadas por prioridad",
       "  recurso_asignar <necesidad_id> <recurso_id> <cant>",
-      "  inventario <nombre_recurso> [zona]",
       "  albergue_registrar <id> <nombre> <zona> <capacidad>",
       "  albergue_ingreso <albergue_id> <documento>",
       "  albergue_salida <albergue_id> <documento>",
+      "  albergue_consultar <id> | albergues_reporte   - Cupos disponibles y ranking de ocupación",
       "  persona_reportar <doc> <nombre> <zona> <estado> <edad>",
+      "  persona_buscar <criterio>                     - Busca por documento, nombre, zona o estado",
       "  mensaje_enviar <doc_destino> <contenido>",
       "  mensajes <doc>",
       "  mascota_reportar <perdida|encontrada> <esp> <nom> <caract> <color> <tam> <zona> <contacto> [id]",
+      "  mascota_coincidencias                         - Lista posibles parejas con puntaje de similitud",
       "  mascota_confirmar <id_perdida> <id_encontrada>",
-      "  simular_concurrencia                          - Ejecuta prueba de carrera en inventario en vivo",
-      "  salir                                         - Termina el programa"
+      "  resumen (o summary)                           - Vista consolidada global del sistema",
+      "  simular_concurrencia                          - Prueba de carrera en inventario en vivo"
     ]
     |> Enum.each(&IO.puts/1)
   end
