@@ -1,0 +1,14 @@
+[
+  %Mascota{
+    id: 1,
+    tipo_reporte: :perdida,
+    especie: "perro",
+    nombre: "Firulais",
+    caracteristicas: "Tiene un collar azul",
+    color: "negro",
+    tamano: "mediano",
+    zona: "norte",
+    contacto: "3001234567",
+    estado: :activa
+  }
+]
